@@ -82,13 +82,20 @@ interactive_mode() {
 
 non_interactive_mode() {
 
-    if [ "$#" -ne 6 ]; then
+    if [ "$#" -lt 6 ]; then
         echo "Usage: $0 --non-interactive <env1> <name1> <ver1> <env2> <name2> <ver2>"
         exit 1
     fi
     S1=$(get_api_definition "$1" "$2" "$3")
     S2=$(get_api_definition "$4" "$5" "$6")
+
+    if [[ "$7" == "--output" && -n "$8" ]]; then
+        OUTPUT_FILE="$8"
+        echo "Saving diff output to: $OUTPUT_FILE"
+        run_diff "$S1" "$S2" > "$OUTPUT_FILE"
+    else    
     run_diff "$S1" "$S2"
+    fi
 }
 
 if [[ "$1" == "--non-interactive" ]]; then
