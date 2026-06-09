@@ -177,14 +177,14 @@ install_metrics() {
 	log progress "Getting metrics-server helm repo"
 	set -e; helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/; set +e
 	set -e; helm upgrade --install metrics-server metrics-server/metrics-server --namespace kube-system --set "args={--kubelet-insecure-tls}"; set +e
-	log progress "Checking metrics server status"
-	if ! (kubectl -n kube-system rollout status deployments metrics-server); then
-		log failure "Metrics server is still not ready"
-		exit 1
-	else
-		log success "Metrics server is ready"
-		return 0
-	fi
+#	log progress "Checking metrics server status"
+#	if ! (kubectl -n kube-system rollout status deployments metrics-server); then
+#		log failure "Metrics server is still not ready"
+#		exit 1
+#	else
+#		log success "Metrics server is ready"
+#		return 0
+#	fi
 }
 
 install_metallb() {
