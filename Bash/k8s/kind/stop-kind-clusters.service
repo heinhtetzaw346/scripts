@@ -1,0 +1,11 @@
+# /etc/systemd/system/stop-kind-clusters.service
+[Unit]
+Description=Stop kind clusters on startup
+After=docker.service
+
+[Service]
+ExecStart=/home/heinhtetzaw346/.local/bin/stop-kind-clusters.sh
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
