@@ -16,9 +16,10 @@ declare help_message="----------------------------------------------------------
 Please provide --profile flag with the following values
 🚀 full (calico, metrics-server, metallb, istio)
 🚀 kind (metrics-server, metallb, istio)
+🚀 vanilla (calico, metrics-server, metallb)
 🚀 minimal (metrics-server, metallb)"
 
-declare available_options=("full" "minimal" "kind")
+declare available_options=("full" "minimal" "kind" "vanilla")
 
 log() {
 	case "$1" in
@@ -288,6 +289,15 @@ profile_kind() {
 	cleanup
 }
 
+profile_vanilla() {
+	install_calico
+	setup_networks
+	install_metrics
+	install_metallb
+	setup_metallb
+	cleanup
+}
+
 main() {
 	mkdir -p $temp_path
 	check_args "$@"
@@ -304,6 +314,9 @@ main() {
 			;;
 		minimal)
 			profile_minimal
+			;;
+		vanilla)
+			profile_vanilla
 			;;
 		esac
 	log success "Cluster-setup script exited"
