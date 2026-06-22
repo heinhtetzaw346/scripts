@@ -16,7 +16,8 @@ $0 replay -s 2 my-record.log [ replay stream mode with double speed ];
 $0 replay -s -I|--interactive [ select file to replay interactively ]
 $0 showdir [ show default log directory ]
 $0 cleanup [ clean up log date directories older than one month in default log directory ]
-$0 cleanup -A|--all [ clean up all log date directories in default log directory ] "
+$0 cleanup -A|--all [ clean up all log date directories in default log directory ]
+$0 find date-dir|-A|--all keyword [ find the keyword in target date directory or all date directories ]"
 	return 0
 }
 
