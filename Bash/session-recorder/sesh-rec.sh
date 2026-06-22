@@ -24,6 +24,9 @@ record() {
 
 	if [ -z "$RECORDING" ]; then
 		export RECORDING="true"
+	else
+		echo "Script is already recording this session"
+		exit 1
 	fi
 
 	if [ -z "$1" ]; then 
@@ -168,33 +171,37 @@ install_self() {
 	fi
 }
 
-mkdir -p $log_dir
+main() {
+	mkdir -p $log_dir
 
-declare mode="$1"
-shift
+	declare mode="$1"
+	shift
 
-case "$mode" in
-	"help")
-		help
-		;;
-	"record")
-		record "$@"
-		;;
-	"replay")
-		replay "$@"
-		;;
-	"showdir")
-		showdir
-		;;
-	"cleanup")
-		cleanup "$@"
-		;;
-	"install")
-		install_self
-		;;
-	*)
-		echo "Invalid Option [ $mode ]"
-		help
-		exit 0
-		;;
-esac
+	case "$mode" in
+		"help")
+			help
+			;;
+		"record")
+			record "$@"
+			;;
+		"replay")
+			replay "$@"
+			;;
+		"showdir")
+			showdir
+			;;
+		"cleanup")
+			cleanup "$@"
+			;;
+		"install")
+			install_self
+			;;
+		*)
+			echo "Invalid Option [ $mode ]"
+			help
+			exit 0
+			;;
+	esac
+}
+
+main "$@"
