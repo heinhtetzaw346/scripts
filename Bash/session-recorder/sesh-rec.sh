@@ -62,8 +62,8 @@ interactive_select() {
 		exit 1
 	fi
 
-	local selected_dir=$(find $log_dir/* -type d | fzf --reverse)
-	interactive_selected_replay_file=$(find $selected_dir -type f -name "*.log" | fzf --reverse)
+	local selected_dir=$(find $log_dir/* -type d | sort | fzf --reverse)
+	interactive_selected_replay_file=$(find $selected_dir -type f -name "*.log" | sort | fzf --reverse)
 	echo "Selected $interactive_selected_replay_file for replay"
 }
 
@@ -156,6 +156,18 @@ cleanup() {
 	[ "$found" == "true" ] || { echo "Nothing to clean up"; exit 0; } && echo "Clean up process finished" 
 }
 
+install_self() {
+	mkdir -p "$HOME/.local/bin"
+	cp "$0" "$HOME/.local/bin/sesh-rec"
+	echo "sesh-rec successfully installed"
+
+	if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+		echo "Please add export PATH=\$PATH:\$HOME/.local/bin to your shell's rc"
+		echo "Here's the command for bash:"
+		echo "echo 'export PATH=\$PATH:\$HOME/.local/bin' >> \$HOME/.bashrc"
+	fi
+}
+
 mkdir -p $log_dir
 
 declare mode="$1"
@@ -176,6 +188,9 @@ case "$mode" in
 		;;
 	"cleanup")
 		cleanup "$@"
+		;;
+	"install")
+		install_self
 		;;
 	*)
 		echo "Invalid Option [ $mode ]"
