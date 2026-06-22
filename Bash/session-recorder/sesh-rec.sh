@@ -21,6 +21,11 @@ $0 cleanup -A|--all [ clean up all log date directories in default log directory
 }
 
 record() {
+
+	if [ -z "$RECORDING" ]; then
+		export RECORDING="true"
+	fi
+
 	if [ -z "$1" ]; then 
 		mkdir -p $current_date_dir
 		local output="$log_file_name" 
