@@ -171,6 +171,31 @@ install_self() {
 	fi
 }
 
+find_logs(){
+	local input="$1"
+	local keyword="$2"
+	if [[ -z "$input" ]]; then
+		echo "Invalid input. Please provide a date dir or a flag [ -all|-A ]"
+		exit 1
+	elif [[ "$input" = "--all" ]] || [ "$input" = "-A" ]; then
+		local search_path="$log_dir/**/*.log"
+	else
+		[[ -d "$log_dir/$input" ]] || { echo "The provided date directory doesn't exist in $log_dir"; exit 1; }
+		local search_path="$log_dir/$input/*.log"
+	fi
+	echo "Searching for keyword in $search_path"
+
+	local found="false"
+
+	for file in $search_path; do
+		col -b < "$file" | sed -E 's/\x1B\[[0-9;]*[a-zA-Z]//g' | grep -H --color=always --label="$file" "$keyword"
+		[[ "$?" -eq 0 ]] && found="true"
+	done
+
+	[[ "$found" = "false" ]] && echo "The keyword [ $keyword ] can't be found"
+
+}
+
 main() {
 	mkdir -p $log_dir
 
@@ -195,6 +220,9 @@ main() {
 			;;
 		"install")
 			install_self
+			;;
+		"find")
+			find_logs "$@"
 			;;
 		*)
 			echo "Invalid Option [ $mode ]"
