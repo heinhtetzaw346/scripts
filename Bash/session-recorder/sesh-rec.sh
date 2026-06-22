@@ -88,7 +88,7 @@ stream() {
 
 	get_check_replay_file "$file_input"
 
-	scriptreplay -d $replay_speed --timing=$timing_file $replay_file
+	scriptreplay -m 1.5 -d $replay_speed --timing=$timing_file $replay_file
 	return 0
 }
 
