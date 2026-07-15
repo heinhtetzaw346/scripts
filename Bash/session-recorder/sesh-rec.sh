@@ -10,9 +10,10 @@ Usage: $0 [ help | record | replay ] [ options ] [ arguments ]
 Example
 $0 record [ hit CTRL+D or enter 'exit' to stop recording ]
 $0 record my-record.log [ provide explicit file name ]
-$0 replay -s|--stream my-record.log [ replay with stream mode ];
-$0 replay -i|--instant my-record.log [ replay with instant mode ];
-$0 replay -s 2 my-record.log [ replay stream mode with double speed ];
+$0 replay -s|--stream my-record.log [ replay with stream mode ]
+$0 replay -i|--instant my-record.log [ replay with instant mode ]
+$0 replay -i|--instant -I|--interactive [ select file to replay instantly ]
+$0 replay -s 2 my-record.log [ replay stream mode with double speed ]
 $0 replay -s -I|--interactive [ select file to replay interactively ]
 $0 showdir [ show default log directory ]
 $0 cleanup [ clean up log date directories older than one month in default log directory ]
@@ -54,12 +55,6 @@ get_check_replay_file(){
 	return 0
 }
 
-instant() {
-	get_check_replay_file "$1"
-	less -Xfr $replay_file
-	return 0
-}
-
 interactive_select() {
 	if ! command -v fzf > /dev/null; then
 		echo "fzf is not installed on this machine, please install it first to use interactive select"
@@ -69,6 +64,19 @@ interactive_select() {
 	local selected_dir=$(find $log_dir/* -type d | sort | fzf --reverse)
 	interactive_selected_replay_file=$(find $selected_dir -type f -name "*.log" | sort | fzf --reverse)
 	echo "Selected $interactive_selected_replay_file for replay"
+}
+
+instant() {
+	file_input="$1"
+
+	if [[ $file_input =~ ^(-I|--interactive)$ ]]; then
+		interactive_select
+		file_input="$interactive_selected_replay_file"
+	fi
+
+	get_check_replay_file "$file_input"
+	less -Xfr $replay_file
+	return 0
 }
 
 stream() {

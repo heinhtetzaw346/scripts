@@ -101,6 +101,13 @@ Open the session log in `less` with ANSI colors parsed:
 sesh-rec replay -i path/to/session.log
 ```
 
+Select a log file interactively using `fzf`:
+```bash
+sesh-rec replay -i -I
+# or
+sesh-rec replay -i --interactive
+```
+
 ### 3. Finding and Searching Logs
 Search for a keyword inside your logs. The search strips out ANSI control sequences, ensuring your search keyword matches the actual text.
 
