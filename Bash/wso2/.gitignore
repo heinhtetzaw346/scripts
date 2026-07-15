@@ -1,6 +1,7 @@
 backups
 out
 *.md
+!README.md
 *.csv
 .env*
 !.env.tokens.sample
