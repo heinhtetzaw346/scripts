@@ -210,7 +210,7 @@ setup_metallb() {
 		kubectl get l2advertisements.metallb.io --no-headers -n metallb-system | grep pool > /dev/null 2>&1 && \
 		log success "Metallb IPAddressPool and L2Advertisement already exists" && return 0
 
-	if [ -z ${METALLB_VIP_RANGE+true} ]; then
+	if [ -z "${METALLB_VIP_RANGE}" ]; then
 		log progress "Using virtual IP range from \$METALLB_VIP_LIST"
 	else
 		log progress "Auto selecting virtual IP range from node IPs"
