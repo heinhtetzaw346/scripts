@@ -2,7 +2,7 @@ venv
 __pycache__
 out
 backups
-.agent
-agent
+.agent*
+agent*
 test
 *test*
