@@ -10,8 +10,8 @@ import() {
 
 list() {
 	OPTION="$1"
-	[ -z "${OPTION}" ] && { openvpn3 configs-list; }
-	[ "$OPTION" = "s" ] || [ "$OPTION" = "session" ] && { openvpn3 sessions-list; }
+	[ -z "${OPTION}" ] && { openvpn3 configs-list; exit 0; }
+	{ [ "$OPTION" = "s" ] || [ "$OPTION" = "session" ]; } || { echo "Invalid list option [$OPTION]"; exit 1; } && { openvpn3 sessions-list; exit 0; }
 }
 
 remove() {
@@ -63,12 +63,28 @@ log() {
 	tail -n 0 -f $LOG_FILE
 }
 
+help() {
+	cat << EOF
+Usage: $(basename "$0") <command> [options]
+
+Commands:
+  import <file> <name>       Import an OpenVPN configuration file with a name
+  list, ls [s|session]       List imported configurations (or active sessions with 's' or 'session')
+  remove, rm <name>          Remove an imported configuration
+  c, connect, start [name]   Connect to a VPN configuration (defaults to first available)
+  d, disconnect, stop [name] Disconnect an active VPN session (defaults to first active)
+  stats [name]               Show statistics for an active VPN session (defaults to first active)
+  log [all]                  Stream live logs (or view system journal logs with 'all')
+  help, -h, --help           Display this help message
+EOF
+}
+
 main() {
 	#binary check
 	command -v openvpn3 > /dev/null || { echo "openvpn3 command can't be found"; exit 1;}
 
 	ACTION="$1"
-	shift
+	[ $# -gt 0 ] && shift
 
 	case "$ACTION" in
 		import)
@@ -92,8 +108,13 @@ main() {
 		log)
 			log "$@"
 			;;
+		help|-h|--help)
+			help
+			;;
 		*)
-			echo "Invalid Input"
+			[ -n "$ACTION" ] && echo "Invalid action [$ACTION]"
+			help
+			[ -z "$ACTION" ] && exit 0 || exit 1
 			;;
 	esac
 
