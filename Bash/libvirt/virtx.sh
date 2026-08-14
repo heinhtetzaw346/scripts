@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #Variables
-declare VIRTX_INSTALL_PATH="$HOME/.local/bin/virtx"
+VIRTX_INSTALL_PATH="${VIRTX_INSTALL_PATH:-$HOME/.local/bin/virtx}"
 
 #Colors
 declare WHITE="\033[0m" #white
@@ -39,6 +39,7 @@ Commands:
   storage|s       storage related commands
   network|n       network related commands
   snapshot|snap   snapshot related commands
+  clone|cl        clone existing instance VM
   help|--help|-h  show this page
 
 Options:
@@ -544,23 +545,24 @@ instance_help() {
 Usage: $(basename "$0") instance <command> [options]
 
 Commands:
-  create|c <name>   create instance
-  delete|d [name]   delete instance (interactive if name omitted)
-  list|ls           list all instances with detailed info
-  edit|e [name]     edit instance CPU & Memory (interactive if name omitted)
-  help|--help|-h  show this page
+  create|c <name>        create instance
+  clone|cl [orig] [new]  clone instance (interactive if omitted)
+  delete|d [name]        delete instance (interactive if name omitted)
+  list|ls                list all instances with detailed info
+  edit|e [name]          edit instance CPU & Memory (interactive if name omitted)
+  help|--help|-h       show this page
 
 Options:
-  --cpu|-c          number of vcpu cores [default: 2]
-  --disk-path|-d    disk path to qcow2
-  --disk-size|-s    disk size GigaBytes [default: 20]
-  --firmware|-f     firmware mode bios or uefi [default: bios]
-  --graphics|-g     graphics mode spice or vnc [default: spice]
-  --iso|-i          path to ISO file
-  --memory|-m       memory size GigaBytes [default: 2]
-  --network|-n      network name [default: default]
-  --os-variant|-o   os variant name (e.g. almalinux10, ubuntu24.04, generic) [default: generic]
-  --verbose|-v      show what's being done in detail
+  --cpu|-c               number of vcpu cores [default: 2]
+  --disk-path|-d         disk path to qcow2
+  --disk-size|-s         disk size GigaBytes [default: 20]
+  --firmware|-f          firmware mode bios or uefi [default: bios]
+  --graphics|-g          graphics mode spice or vnc [default: spice]
+  --iso|-i               path to ISO file
+  --memory|-m            memory size GigaBytes [default: 2]
+  --network|-n           network name [default: default]
+  --os-variant|-o        os variant name (e.g. almalinux10, ubuntu24.04, generic) [default: generic]
+  --verbose|-v           show what's being done in detail
 EOF
 }
 
@@ -1018,6 +1020,9 @@ instance() {
       ;;
     create|c)
       instance_create "$@"
+      ;;
+    clone|cl)
+      clone_instance "$@"
       ;;
     delete|d)
       instance_delete "$@"
@@ -1963,6 +1968,212 @@ snapshot() {
   esac
 }
 
+# ==============================================================================
+# Instance Clone Step Functions & Handlers
+# ==============================================================================
+
+select_clone_original() {
+  local vms=()
+  readarray -t vms < <(get_all_instances)
+  if [ ${#vms[@]} -eq 0 ]; then
+    log error "No instances found to clone."
+    return 1
+  fi
+
+  local options=("[ < Cancel ]" "${vms[@]}")
+  local choice
+  choice=$(select_option "[Step 1/3] Select Original VM to Clone" "${options[@]}")
+  [ $? -eq 130 ] && return 130
+
+  if [[ "$choice" == "[ < Cancel ]" || -z "$choice" ]]; then
+    return 1
+  fi
+
+  ORIGINAL_VM="$choice"
+  return 0
+}
+
+select_clone_name() {
+  local default_name="${ORIGINAL_VM}-clone"
+  local choice
+  choice=$(select_option "[Step 2/3] Set Cloned Instance Name ($ORIGINAL_VM)" "[ > Next (Default Name: $default_name) ]" "[ < Back ]" "[ Custom Name Input ]")
+  [ $? -eq 130 ] && return 130
+
+  if [[ "$choice" == "[ < Back ]" ]]; then
+    return 1
+  elif [[ "$choice" == "[ > Next (Default Name: $default_name) ]" || -z "$choice" ]]; then
+    CLONE_NAME="$default_name"
+    return 0
+  elif [[ "$choice" == "[ Custom Name Input ]" ]]; then
+    read -p "Enter new instance name: " choice
+    if [[ -z "$choice" ]]; then
+      log error "Name cannot be empty."
+      return 1
+    fi
+  fi
+
+  CLONE_NAME="$choice"
+  return 0
+}
+
+select_clone_disk() {
+  local ds_path=$(get_datastore_path)
+  local default_target="${ds_path}/${CLONE_NAME}.qcow2"
+  local choice
+  choice=$(select_option "[Step 3/3] Select Disk Copy Destination ($CLONE_NAME)" "[ > Next (Auto-Generate: $default_target) ]" "[ < Back ]" "[ Custom Disk Path Input ]")
+  [ $? -eq 130 ] && return 130
+
+  if [[ "$choice" == "[ < Back ]" ]]; then
+    return 1
+  elif [[ "$choice" == "[ > Next (Auto-Generate: "* || -z "$choice" ]]; then
+    CLONE_DISK=""
+    return 0
+  elif [[ "$choice" == "[ Custom Disk Path Input ]" ]]; then
+    read -e -p "Enter custom disk path: " choice
+    if [[ -z "$choice" ]]; then
+      log error "Disk path cannot be empty."
+      return 1
+    fi
+    CLONE_DISK="$choice"
+  fi
+
+  return 0
+}
+
+select_clone_confirm() {
+  cat << EOF
+
+==================================================
+        Instance Clone Summary
+==================================================
+  Original VM : $ORIGINAL_VM
+  New VM Name : $CLONE_NAME
+  Storage Path: ${CLONE_DISK:-Auto-generated}
+==================================================
+EOF
+
+  local choice
+  choice=$(select_option "Confirm Instance Cloning" "[ Confirm & Clone Instance ]" "[ < Back ]" "[ Cancel ]")
+  [ $? -eq 130 ] && return 130
+
+  if [[ "$choice" == "[ < Back ]" ]]; then
+    return 1
+  elif [[ "$choice" == "[ Confirm & Clone Instance ]" || -z "$choice" ]]; then
+    return 0
+  else
+    log normal "Cancelled."
+    exit 0
+  fi
+}
+
+interactive_select_clone() {
+  trap 'log normal "\nInstance clone cancelled by user."; exit 0' INT
+  local steps=(
+    "select_clone_original"
+    "select_clone_name"
+    "select_clone_disk"
+    "select_clone_confirm"
+  )
+  local current_step=0
+  LAST_DIRECTION="forward"
+
+  while (( current_step >= 0 && current_step < ${#steps[@]} )); do
+    "${steps[$current_step]}"
+    local status=$?
+
+    if [[ $status -eq 0 ]]; then
+      LAST_DIRECTION="forward"
+      ((current_step++))
+    elif [[ $status -eq 1 ]]; then
+      LAST_DIRECTION="backward"
+      ((current_step--))
+    elif [[ $status -eq 130 ]]; then
+      log normal "Instance clone cancelled by user."
+      exit 0
+    else
+      log error "Selection aborted."
+      exit 1
+    fi
+  done
+
+  if (( current_step < 0 )); then
+    log normal "Instance clone cancelled."
+    exit 0
+  fi
+}
+
+clone_help() {
+  cat << EOF
+## Libvirt KVM Wrapper - virtx clone ##
+Usage: $(basename "$0") clone [original_vm] [new_vm] [options]
+
+Options:
+  --file|-f <path>    custom disk filepath for cloned instance
+  --verbose|-v        show what's being done in detail
+EOF
+}
+
+clone_instance() {
+  ARGS=("$@")
+  if [ -n "${ARGS[0]}" ] && ! [[ "${ARGS[0]}" =~ ^- ]]; then
+    ORIGINAL_VM="${ARGS[0]}"
+    ARGS=("${ARGS[@]:1}")
+    if [ -n "${ARGS[0]}" ] && ! [[ "${ARGS[0]}" =~ ^- ]]; then
+      CLONE_NAME="${ARGS[0]}"
+      ARGS=("${ARGS[@]:1}")
+    fi
+  fi
+
+  local non_interactive="false"
+  if [ -n "$ORIGINAL_VM" ] && [ -n "$CLONE_NAME" ]; then
+    non_interactive="true"
+  fi
+
+  if [ "$non_interactive" = "true" ]; then
+    array_length="${#ARGS[@]}"
+    i=0
+    while [ "$i" -lt "$array_length" ]; do
+      case "${ARGS[$i]}" in
+        --file|-f)
+          CLONE_DISK="${ARGS[$((i+1))]}"
+          i=$((i+2))
+          continue
+          ;;
+        --verbose|-v)
+          VERBOSE="true"
+          i=$((i+1))
+          continue
+          ;;
+        *)
+          i=$((i+1))
+      esac
+    done
+  else
+    interactive_select_clone
+  fi
+
+  log progress "Cloning instance '$ORIGINAL_VM' into '$CLONE_NAME'..."
+
+  local clone_cmd=("virt-clone" "--original" "$ORIGINAL_VM" "--name" "$CLONE_NAME")
+  if [ -n "$CLONE_DISK" ]; then
+    clone_cmd+=("--file" "$CLONE_DISK")
+  else
+    clone_cmd+=("--auto-clone")
+  fi
+
+  if [ "$VERBOSE" = "true" ]; then
+    log normal "Running: ${clone_cmd[*]}"
+  fi
+
+  "${clone_cmd[@]}" 2>/dev/null
+
+  if [ $? -eq 0 ]; then
+    log success "Instance '$CLONE_NAME' successfully cloned from '$ORIGINAL_VM'!"
+  else
+    log error "Failed to clone instance '$ORIGINAL_VM'."
+  fi
+}
+
 main() {
   ACTION="$1"
   shift || true
@@ -1984,6 +2195,9 @@ main() {
       ;;
     snapshot|snap|sp)
       snapshot "$@"
+      ;;
+    clone|cl)
+      clone_instance "$@"
       ;;
     *)
       [ -n "$ACTION" ] && echo "Invalid action [$ACTION]"
