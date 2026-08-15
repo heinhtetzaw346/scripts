@@ -455,6 +455,10 @@ select_os_variant() {
     return 0
   fi
 
+  # Extract only the first result if the selected choice has multiple comma-separated values
+  choice="${choice%%,*}"
+  choice=$(echo "$choice" | xargs)
+
   OS_VARIANT="$choice"
   return 0
 }
@@ -549,7 +553,7 @@ Commands:
   clone|cl [orig] [new]  clone instance (interactive if omitted)
   delete|d [name]        delete instance (interactive if name omitted)
   list|ls                list all instances with detailed info
-  edit|e [name]          edit instance CPU & Memory (interactive if name omitted)
+  edit|e [name]          edit instance CPU, Memory & Graphics (interactive if omitted)
   help|--help|-h       show this page
 
 Options:
@@ -633,7 +637,7 @@ instance_create() {
     done
   fi
 
-  # Apply defaults if still unassigned
+  # Apply defaults if still unassigned and extract first value if comma-separated
   CPU_CORE="${CPU_CORE:-2}"
   MEMORY="${MEMORY:-2}"
   DISK_SIZE="${DISK_SIZE:-20}"
@@ -641,6 +645,8 @@ instance_create() {
   GRAPHICS="${GRAPHICS:-spice}"
   NETWORK="${NETWORK:-default}"
   OS_VARIANT="${OS_VARIANT:-generic}"
+  OS_VARIANT="${OS_VARIANT%%,*}"
+  OS_VARIANT=$(echo "$OS_VARIANT" | xargs)
 
   if [ -z "$DISK_PATH" ]; then
     local ds_path=$(get_datastore_path)
@@ -680,19 +686,48 @@ instance_create() {
   if [ "$GRAPHICS" = "none" ]; then
     virt_cmd+=("--graphics" "none" "--console" "pty,target.type=serial" "--noautoconsole")
   else
-    virt_cmd+=("--graphics" "$GRAPHICS" "--noautoconsole")
+    virt_cmd+=("--graphics" "$GRAPHICS" "--video" "virtio" "--noautoconsole")
   fi
 
   virt_cmd+=("--print-xml" "1")
 
   if [ "$VERBOSE" = "true" ]; then
-    log normal "Running: ${virt_cmd[*]} | virsh define /dev/stdin"
+    log normal "Running: ${virt_cmd[*]}"
   fi
 
-  "${virt_cmd[@]}" | virsh define /dev/stdin
+  local raw_xml
+  raw_xml=$("${virt_cmd[@]}")
+
+  local final_xml
+  final_xml=$(python3 -c '
+import sys
+import xml.etree.ElementTree as ET
+
+xml_str = sys.stdin.read()
+root = ET.fromstring(xml_str)
+os_elem = root.find("os")
+if os_elem is not None:
+    for b in os_elem.findall("boot"):
+        os_elem.remove(b)
+    b_hd = ET.SubElement(os_elem, "boot")
+    b_hd.set("dev", "hd")
+    b_cd = ET.SubElement(os_elem, "boot")
+    b_cd.set("dev", "cdrom")
+
+on_reboot = root.find("on_reboot")
+if on_reboot is not None:
+    on_reboot.text = "restart"
+else:
+    on_reboot = ET.SubElement(root, "on_reboot")
+    on_reboot.text = "restart"
+
+print(ET.tostring(root, encoding="unicode"))
+' <<< "$raw_xml")
+
+  echo "$final_xml" | virsh define /dev/stdin >/dev/null 2>&1
 
   if [ $? -eq 0 ]; then
-    log success "Instance '$RESOURCE_NAME' successfully defined (shut off)!"
+    log success "Instance '$RESOURCE_NAME' successfully defined (boot order: disk -> cdrom)!"
   else
     log error "Failed to create instance '$RESOURCE_NAME'."
   fi
@@ -727,26 +762,36 @@ instance_delete() {
 
   log progress "Deleting instance '$RESOURCE_NAME'..."
   
-  # Identify target disks safely (excluding .iso images)
+  # Identify target datastore virtual disks (Device=='disk', excluding cdrom and .iso images)
   local storage_args=()
-  local targets=()
-  readarray -t targets < <(virsh domblklist "$RESOURCE_NAME" 2>/dev/null | awk 'NR>2 && $1!="" {print $1}')
-  for target in "${targets[@]}"; do
-    local src
-    src=$(virsh domblklist "$RESOURCE_NAME" 2>/dev/null | awk -v t="$target" '$1==t {print $2}')
-    if [[ "$src" =~ \.iso$ ]]; then
+  local blk_lines=()
+  readarray -t blk_lines < <(virsh domblklist "$RESOURCE_NAME" --details 2>/dev/null | awk 'NR>2 && $1!="" {print $2, $3, $4}')
+  
+  for line in "${blk_lines[@]}"; do
+    [ -z "$line" ] && continue
+    local dev_type=$(echo "$line" | awk '{print $1}')
+    local target=$(echo "$line" | awk '{print $2}')
+    local src=$(echo "$line" | awk '{print $3}')
+
+    # Skip CD-ROM devices, empty drives (-), and .iso image files
+    if [ "$dev_type" = "cdrom" ] || [[ "$src" =~ \.iso$ ]] || [ "$src" = "-" ]; then
       continue
     fi
-    storage_args+=("--storage" "$target")
+
+    # Include only datastore virtual disks
+    if [ "$dev_type" = "disk" ]; then
+      storage_args+=("--storage" "$target")
+    fi
   done
-  if [ ${#storage_args[@]} -eq 0 ]; then
-    storage_args=("--remove-all-storage")
+
+  if [ "$VERBOSE" = "true" ]; then
+    log normal "Undefine storage targets: ${storage_args[*]:-None (ISO/CDROM only or diskless)}"
   fi
 
   virsh destroy "$RESOURCE_NAME" 2>/dev/null
   virsh undefine "$RESOURCE_NAME" "${storage_args[@]}" --nvram --managed-save --snapshots-metadata
   if [ $? -eq 0 ]; then
-    log success "Instance '$RESOURCE_NAME' successfully deleted (purged storage & NVRAM)."
+    log success "Instance '$RESOURCE_NAME' successfully deleted (datastore disk & NVRAM purged, ISO untouched)."
   else
     log error "Failed to delete instance '$RESOURCE_NAME'."
   fi
@@ -845,7 +890,7 @@ select_edit_memory() {
   [ $cur_mem_gb -eq 0 ] && cur_mem_gb=1
 
   local choice
-  choice=$(select_option "[Step 2/2] Select Memory Size in GB for ($RESOURCE_NAME)" "[ > Keep Current (${cur_mem_gb} GB) ]" "[ < Back ]" "1" "2" "4" "8" "16" "32" "[ Custom Input ]")
+  choice=$(select_option "[Step 2/3] Select Memory Size in GB for ($RESOURCE_NAME)" "[ > Keep Current (${cur_mem_gb} GB) ]" "[ < Back ]" "1" "2" "4" "8" "16" "32" "[ Custom Input ]")
   [ $? -eq 130 ] && return 130
 
   if [[ "$choice" == "[ < Back ]" ]]; then
@@ -867,6 +912,32 @@ select_edit_memory() {
   return 0
 }
 
+select_edit_graphics() {
+  local cur_xml=$(virsh dumpxml "$RESOURCE_NAME" 2>/dev/null)
+  local cur_gfx="none"
+  if echo "$cur_xml" | grep -qE "<graphics type='spice'|<graphics type=\"spice\""; then
+    cur_gfx="spice"
+  elif echo "$cur_xml" | grep -qE "<graphics type='vnc'|<graphics type=\"vnc\""; then
+    cur_gfx="vnc"
+  fi
+
+  local choice
+  choice=$(select_option "[Step 3/3] Select Graphics Mode for ($RESOURCE_NAME)" "[ > Keep Current ($cur_gfx) ]" "[ < Back ]" "spice (SPICE Graphics)" "vnc (VNC Graphics)" "none (Headless / No Graphics)")
+  [ $? -eq 130 ] && return 130
+
+  if [[ "$choice" == "[ < Back ]" ]]; then
+    return 1
+  elif [[ "$choice" == "[ > Keep Current ("* || -z "$choice" ]]; then
+    EDIT_GRAPHICS="$cur_gfx"
+    return 0
+  else
+    choice="${choice%% *}"
+  fi
+
+  EDIT_GRAPHICS="$choice"
+  return 0
+}
+
 select_edit_confirm() {
   cat << EOF
 
@@ -874,8 +945,9 @@ select_edit_confirm() {
         Instance Edit Summary ($RESOURCE_NAME)
 ==================================================
   Instance Name : $RESOURCE_NAME
-  New vCPU Cores: $EDIT_CPU
-  New Memory    : $EDIT_MEMORY GB
+  New vCPU Cores: ${EDIT_CPU:-Unchanged}
+  New Memory    : ${EDIT_MEMORY:+$EDIT_MEMORY GB}
+  New Graphics  : ${EDIT_GRAPHICS:-Unchanged}
 ==================================================
 EOF
 
@@ -898,6 +970,7 @@ interactive_select_edit() {
   local steps=(
     "select_edit_cpu"
     "select_edit_memory"
+    "select_edit_graphics"
     "select_edit_confirm"
   )
   local current_step=0
@@ -926,6 +999,50 @@ interactive_select_edit() {
     log normal "Instance edit cancelled."
     exit 0
   fi
+}
+
+update_instance_graphics() {
+  local vm="$1"
+  local gfx="$2"
+
+  python3 -c '
+import sys, subprocess
+import xml.etree.ElementTree as ET
+
+vm = sys.argv[1]
+gfx_mode = sys.argv[2]
+
+res = subprocess.run(["virsh", "dumpxml", vm], capture_output=True, text=True)
+if res.returncode != 0:
+    sys.exit(1)
+
+root = ET.fromstring(res.stdout)
+devices = root.find("devices")
+
+if devices is not None:
+    if gfx_mode != "spice":
+        for elem in list(devices):
+            if elem.tag in ("channel", "redirdev", "audio") and elem.get("type") in ("spice", "spicevmc"):
+                devices.remove(elem)
+            elif elem.tag == "channel":
+                target = elem.find("target")
+                if target is not None and "spice" in target.get("name", ""):
+                    devices.remove(elem)
+
+    graphics = devices.find("graphics")
+    if gfx_mode == "none":
+        if graphics is not None:
+            devices.remove(graphics)
+    else:
+        if graphics is None:
+            graphics = ET.SubElement(devices, "graphics")
+        graphics.set("type", gfx_mode)
+        graphics.set("autoport", "yes")
+
+xml_out = ET.tostring(root, encoding="unicode")
+proc = subprocess.run(["virsh", "define", "/dev/stdin"], input=xml_out, capture_output=True, text=True)
+sys.exit(proc.returncode)
+' "$vm" "$gfx"
 }
 
 instance_edit() {
@@ -974,6 +1091,11 @@ instance_edit() {
           i=$((i+2))
           continue
           ;;
+        --graphics|-g)
+          EDIT_GRAPHICS="${ARGS[$((i+1))]}"
+          i=$((i+2))
+          continue
+          ;;
         --verbose|-v)
           VERBOSE="true"
           i=$((i+1))
@@ -987,7 +1109,7 @@ instance_edit() {
     interactive_select_edit
   fi
 
-  log progress "Updating instance '$RESOURCE_NAME' (vCPU: ${EDIT_CPU:-Unchanged}, Memory: ${EDIT_MEMORY:+$EDIT_MEMORY GB})..."
+  log progress "Updating instance '$RESOURCE_NAME' (vCPU: ${EDIT_CPU:-Unchanged}, Memory: ${EDIT_MEMORY:+$EDIT_MEMORY GB}, Graphics: ${EDIT_GRAPHICS:-Unchanged})..."
 
   if [ -n "$EDIT_CPU" ]; then
     if [ "$VERBOSE" = "true" ]; then
@@ -1002,6 +1124,13 @@ instance_edit() {
       log normal "Running: virt-xml $RESOURCE_NAME --edit --memory $mem_mb"
     fi
     virt-xml "$RESOURCE_NAME" --edit --memory "$mem_mb" >/dev/null 2>&1
+  fi
+
+  if [ -n "$EDIT_GRAPHICS" ]; then
+    if [ "$VERBOSE" = "true" ]; then
+      log normal "Updating graphics mode for '$RESOURCE_NAME' to '$EDIT_GRAPHICS'..."
+    fi
+    update_instance_graphics "$RESOURCE_NAME" "$EDIT_GRAPHICS"
   fi
 
   if [ $? -eq 0 ]; then
