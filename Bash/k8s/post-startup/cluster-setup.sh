@@ -3,7 +3,7 @@
 
 #envars
 CALICO_VERSION="${CALICO_VERSION:-v3.31.3}"
-METALLB_VIP_RANGE=${METALLB_VIP_RANGE}
+METALLB_VIP_RANGE="${METALLB_VIP_RANGE:-}"
 
 declare WHITE="\033[0m" #white
 declare RED="\033[1;31m" #red
@@ -210,11 +210,16 @@ setup_metallb() {
 		kubectl get l2advertisements.metallb.io --no-headers -n metallb-system | grep pool > /dev/null 2>&1 && \
 		log success "Metallb IPAddressPool and L2Advertisement already exists" && return 0
 
-	if ! [ -z "${METALLB_VIP_RANGE+true}" ]; then
-		log progress "Using virtual IP range from \$METALLB_VIP_RANGE"
+	if [ -n "${METALLB_VIP_RANGE}" ]; then
+		log progress "Using virtual IP range from \$METALLB_VIP_RANGE ($METALLB_VIP_RANGE)"
 	else
 		log progress "Auto selecting virtual IP range from node IPs"
-		IFS="." read -ra IP <<< $(kubectl get nodes --no-headers -o custom-columns="IP:.status.addresses[0].address" | head -n 1)
+		local node_ip
+		node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+		if [ -z "$node_ip" ]; then
+			node_ip=$(kubectl get nodes --no-headers -o custom-columns="IP:.status.addresses[0].address" 2>/dev/null | head -n 1)
+		fi
+		IFS="." read -ra IP <<< "$node_ip"
 		METALLB_VIP_RANGE="${IP[0]}.${IP[1]}.${IP[2]}.200-${IP[0]}.${IP[1]}.${IP[2]}.250"
 	fi
 		log progress "Generating metallb manifests in $temp_path/metallb_ip_l2.yml"
