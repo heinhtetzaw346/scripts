@@ -6,19 +6,19 @@ declare log_file_name="$current_date_dir/sesh-$(date +%Y-%m-%d_%H-%M-%S).log"
 
 help() {
 	echo "----------------------------------------------------------------------------
-Usage: $0 [ help | record | replay ] [ options ] [ arguments ]
+	Usage: $(basename $0) [ help | record | replay ] [ options ] [ arguments ]
 Example
-$0 record [ hit CTRL+D or enter 'exit' to stop recording ]
-$0 record my-record.log [ provide explicit file name ]
-$0 replay -s|--stream my-record.log [ replay with stream mode ]
-$0 replay -i|--instant my-record.log [ replay with instant mode ]
-$0 replay -i|--instant -I|--interactive [ select file to replay instantly ]
-$0 replay -s 2 my-record.log [ replay stream mode with double speed ]
-$0 replay -s -I|--interactive [ select file to replay interactively ]
-$0 showdir [ show default log directory ]
-$0 cleanup [ clean up log date directories older than one month in default log directory ]
-$0 cleanup -A|--all [ clean up all log date directories in default log directory ]
-$0 find date-dir|-A|--all keyword [ find the keyword in target date directory or all date directories ]"
+$(basename $0) record [ hit CTRL+D or enter 'exit' to stop recording ]
+$(basename $0) record my-record.log [ provide explicit file name ]
+$(basename $0) replay -s|--stream my-record.log [ replay with stream mode ]
+$(basename $0) replay -i|--instant my-record.log [ replay with instant mode ]
+$(basename $0) replay -i|--instant -I|--interactive [ select file to replay instantly ]
+$(basename $0) replay -s 2 my-record.log [ replay stream mode with double speed ]
+$(basename $0) replay -s -I|--interactive [ select file to replay interactively ]
+$(basename $0) showdir [ show default log directory ]
+$(basename $0) cleanup [ clean up log date directories older than one month in default log directory ]
+$(basename $0) cleanup -A|--all [ clean up all log date directories in default log directory ]
+$(basename $0) find date-dir|-A|--all keyword [ find the keyword in target date directory or all date directories ]"
 	return 0
 }
 
