@@ -5,13 +5,17 @@ param (
   [switch]$c
 )
 
-$config_dir="$env:USERPROFILE\kubectl-configs"
-$contexts=Get-ChildItem $config_dir | Sort-Object LastWriteTime | Select-Object -ExpandProperty Name 
 
 function GetInput {
-  param (
-    [int]$param_option
-  )
+  $config_dir="$env:USERPROFILE\.kube\config.d"
+
+  if (-not (Test-Path -Path "$config_dir" -PathType Container)) {
+    Write-Host "`"$config_dir`" doesn't exist yet. Please create it"
+    Exit 1
+  }
+
+  $contexts=Get-ChildItem $config_dir | Sort-Object LastWriteTime | Select-Object -ExpandProperty Name 
+
   Write-Host "No config selected or is invalid, going into interactive mode..."
  
   While ($true){
@@ -45,4 +49,3 @@ if ($c) {
 }
 
 GetInput
-
