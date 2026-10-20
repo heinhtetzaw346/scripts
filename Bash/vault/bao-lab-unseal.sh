@@ -9,10 +9,13 @@ VAULT_RN="openbao"
 
 for i in {0..2}
 do
+    kubectl get pods -n "${VAULT_NS}" "${VAULT_RN}-$i" > /dev/null 2>&1 || { echo "${VAULT_RN}-$i pod doesn't exist yet"; }
     for key in "${KEYS[@]:0:3}"; do
-        kubectl get pods -n "${VAULT_NS}" "${VAULT_RN}-$i" > /dev/null 2>&1 && \
-            kubectl exec -i -n "${VAULT_NS}" "${VAULT_RN}-$i" -- bao operator unseal "${key}"
+        kubectl exec -i -n "${VAULT_NS}" "${VAULT_RN}-$i" -- bao operator unseal "${key}"
     done
+    echo ""
+    kubectl wait --for=condition=Ready -n ${VAULT_NS} pod/${VAULT_RN}-$i
+    echo ""
     sleep 1
 done
 
