@@ -4,6 +4,7 @@
 #envars
 CALICO_VERSION="${CALICO_VERSION:-v3.31.3}"
 METALLB_VIP_RANGE="${METALLB_VIP_RANGE:-}"
+GATEWAY_API_URL="${GATEWAY_API_URL:-https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml}"
 
 declare WHITE="\033[0m" #white
 declare RED="\033[1;31m" #red
@@ -14,10 +15,10 @@ declare temp_path="/tmp/cluster-setup"
 declare help_message="------------------------------------------------------------
 ⚓ post-startup kubernetes setup script ⚓
 Please provide --profile flag with the following values
-🚀 full (calico, metrics-server, metallb, istio)
-🚀 kind (metrics-server, metallb, istio)
-🚀 vanilla (calico, metrics-server, metallb)
-🚀 minimal (metrics-server, metallb)"
+🚀 full (calico, gateway-api, metrics-server, metallb, istio)
+🚀 kind (gateway-api, metrics-server, metallb, istio)
+🚀 vanilla (calico, gateway-api, metrics-server, metallb)
+🚀 minimal (gateway-api, metrics-server, metallb)"
 
 declare available_options=("full" "minimal" "kind" "vanilla")
 
@@ -170,6 +171,35 @@ EOF
 	fi
 }
 
+install_gateway_api() {
+	if kubectl get crd gatewayclasses.gateway.networking.k8s.io > /dev/null 2>&1; then
+		log success "Gateway API CRDs are already installed"
+		return 0
+	fi
+
+	log progress "Getting latest Gateway API standard channel manifest to $temp_path/gateway_api.yaml"
+	curl -fsSL "${GATEWAY_API_URL}" --output "$temp_path/gateway_api.yaml"
+	if [ "$?" -eq 0 ]; then
+		log progress "Installing Gateway API CRDs (standard channel)"
+		kubectl apply -f "$temp_path/gateway_api.yaml"
+	else
+		log failure "Getting Gateway API manifest failed. Try again"
+		exit 1
+	fi
+
+	log progress "Checking Gateway API CRDs status"
+	if kubectl wait --for=condition=Established crd/gatewayclasses.gateway.networking.k8s.io --timeout=60s > /dev/null 2>&1; then
+		log success "Gateway API CRDs are ready"
+		return 0
+	elif kubectl get crd gatewayclasses.gateway.networking.k8s.io > /dev/null 2>&1; then
+		log success "Gateway API CRDs are ready"
+		return 0
+	else
+		log failure "Gateway API CRDs are still not ready"
+		exit 1
+	fi
+}
+
 install_metrics() {
 	if (kubectl -n kube-system rollout status deployments metrics-server > /dev/null 2>&1); then
 		log success "Metrics server is ready"
@@ -272,6 +302,7 @@ cleanup() {
 profile_full() {
 	install_calico
 	setup_networks
+	install_gateway_api
 	install_metrics
 	install_metallb
 	setup_metallb
@@ -280,6 +311,7 @@ profile_full() {
 }
 
 profile_minimal() {
+	install_gateway_api
 	install_metrics
 	install_metallb
 	setup_metallb
@@ -287,6 +319,7 @@ profile_minimal() {
 }
 
 profile_kind() {
+	install_gateway_api
 	install_metrics
 	install_metallb
 	setup_metallb
@@ -297,6 +330,7 @@ profile_kind() {
 profile_vanilla() {
 	install_calico
 	setup_networks
+	install_gateway_api
 	install_metrics
 	install_metallb
 	setup_metallb

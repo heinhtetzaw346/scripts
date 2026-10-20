@@ -1,11 +1,12 @@
 # Kubernetes Post-Startup Cluster Setup
 
-`cluster-setup.sh` is a post-startup shell script designed to bootstrap and configure essential services inside a newly provisioned Kubernetes cluster. The script supports multiple execution profiles (e.g., `full`, `kind`, `vanilla`, `minimal`) to selectively install CNI (Calico), metrics-server, MetalLB (L2 load balancer), and Istio service mesh, while handling node labeling and network address pooling dynamically.
+`cluster-setup.sh` is a post-startup shell script designed to bootstrap and configure essential services inside a newly provisioned Kubernetes cluster. The script supports multiple execution profiles (e.g., `full`, `kind`, `vanilla`, `minimal`) to selectively install CNI (Calico), Kubernetes Gateway API CRDs, metrics-server, MetalLB (L2 load balancer), and Istio service mesh, while handling node labeling and network address pooling dynamically.
 
 ## Features
 
 - **Profile-Driven Installation**: Install specific sets of cluster components using defined profiles (`full`, `kind`, `vanilla`, `minimal`).
 - **Pre-flight Checks**: Verifies that the required binaries exist in the command path and that a valid Kubernetes context is active.
+- **Gateway API Support**: Installs the latest standard channel Gateway API CustomResourceDefinitions (CRDs) across all profiles directly from the official GitHub release.
 - **Automatic Node Labeling**: Labels non-control-plane worker nodes with the standard worker role (`node-role.kubernetes.io/worker=`).
 - **Dynamic IP Pool Matching**: Automatically reads each worker node's podCIDR block to create Calico IPPool CRDs, replacing default pools for accurate routing.
 - **Automated Virtual IP Management**: Auto-detects the host subnet or utilizes user-defined virtual IPs to configure MetalLB's IPAddressPool and L2Advertisement.
@@ -37,6 +38,7 @@ The script behaves dynamically based on the following environment variables:
 | :--- | :--- | :--- |
 | `CALICO_VERSION` | `v3.31.3` | The version tag of Calico to fetch and install from the Project Calico repository. |
 | `METALLB_VIP_RANGE` | *Auto-selected* | The range of virtual IP addresses assigned to the MetalLB L2 load balancer. If not set, it is dynamically computed using the first node's IP address (e.g., `X.Y.Z.200-X.Y.Z.250`). |
+| `GATEWAY_API_URL` | `https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml` | URL to the latest standard channel manifest for Kubernetes Gateway API CRDs. |
 
 ---
 
@@ -44,12 +46,12 @@ The script behaves dynamically based on the following environment variables:
 
 The script provides four deployment profiles, tailored for different cluster runtime contexts:
 
-| Profile | Calico CNI | Metrics Server | MetalLB | Istio Service Mesh | Target Use Case |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`full`** | ✔️ | ✔️ | ✔️ | ✔️ | Standard bare-metal / VM-based multi-node cluster. |
-| **`kind`** | ❌ | ✔️ | ✔️ | ✔️ | Kind (Kubernetes in Docker) local clusters. |
-| **`vanilla`** | ✔️ | ✔️ | ✔️ | ❌ | Clusters requiring routing and monitoring but no mesh. |
-| **`minimal`** | ❌ | ✔️ | ✔️ | ❌ | Basic local development/testing setups. |
+| Profile | Calico CNI | Gateway API | Metrics Server | MetalLB | Istio Service Mesh | Target Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`full`** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ | Standard bare-metal / VM-based multi-node cluster. |
+| **`kind`** | ❌ | ✔️ | ✔️ | ✔️ | ✔️ | Kind (Kubernetes in Docker) local clusters. |
+| **`vanilla`** | ✔️ | ✔️ | ✔️ | ✔️ | ❌ | Clusters requiring routing and monitoring but no mesh. |
+| **`minimal`** | ❌ | ✔️ | ✔️ | ✔️ | ❌ | Basic local development/testing setups. |
 
 ---
 
@@ -64,13 +66,13 @@ Run the script by providing the `--profile` flag and one of the supported values
 ### Examples
 
 #### 1. Full Bootstrap (Production / Staging VMs)
-Install and configure Calico, metrics-server, MetalLB, and Istio:
+Install and configure Calico, Gateway API, metrics-server, MetalLB, and Istio:
 ```bash
 ./cluster-setup.sh --profile full
 ```
 
 #### 2. Local Kind Cluster Setup
-Set up a Kind cluster, skipping Calico installation (since Kind provides its own CNI/networking) but installing Istio:
+Set up a Kind cluster, skipping Calico installation (since Kind provides its own CNI/networking) but installing Gateway API, metrics-server, MetalLB, and Istio:
 ```bash
 ./cluster-setup.sh --profile kind
 ```
@@ -96,6 +98,7 @@ CALICO_VERSION="v3.26.1" ./cluster-setup.sh --profile full
 3. **Worker Labeling**: Inspects cluster nodes, filtering out control-plane nodes, and applies the `node-role.kubernetes.io/worker=` label to unlabeled nodes.
 4. **Component Deployment**: Based on the profile:
    - **Calico**: Downloads the official manifest, applies it, waits for the controller to rollout, generates tailored `IPPool` custom resources per node based on their CIDR, and deletes the default IPv4 pool.
+   - **Gateway API**: Downloads and applies the official standard channel CRDs release from GitHub (`standard-install.yaml`) and verifies CRD establishment.
    - **Metrics Server**: Configures Helm repository, installs metrics-server with `--kubelet-insecure-tls` argument enabled.
    - **MetalLB**: Adds Helm repository, installs MetalLB, and configures L2 advertisement with the computed or specified IP range.
    - **Istio**: Invokes `istioctl` to deploy the `default` profile inside the `istio-system` namespace.
