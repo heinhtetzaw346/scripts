@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+YAD_PID_FILE="/tmp/yad_ovpnx.pid"
+VPN_ICON="openvpn"
+
 import() {
 	CONFIG_FILE=$(realpath "$1" 2>/dev/null)
 	CONFIG_NAME="$2"
@@ -26,6 +29,19 @@ connect() {
 	[ -z "${CONNECT_CONFIG_NAME}" ] && CONNECT_CONFIG_NAME="${CONFIG_LIST[0]}" || { grep "\-\-\-$CONNECT_CONFIG_NAME---" <<< $(echo -n "---";printf "%s---" "${CONFIG_LIST[@]}") > /dev/null || { echo "The connection [$CONNECT_CONFIG_NAME] doesn't exist"; exit 1; }; }
 	
 	openvpn3 session-start --config "${CONNECT_CONFIG_NAME}"
+	local status=$?
+
+	if [ $status -eq 0 ]; then
+		if command -v yad > /dev/null 2>&1; then
+			notify-send -i "$VPN_ICON" -t 4000 "OpenVPN Connected" "Connected to ${CONNECT_CONFIG_NAME}" 2>/dev/null
+			yad --notification \
+				--image="$VPN_ICON" \
+				--text="OpenVPN: Connected to ${CONNECT_CONFIG_NAME}" \
+				--command="/home/fureasu/.local/bin/ovpnx" &
+			echo $! > "$YAD_PID_FILE"
+		fi
+	fi
+	return $status
 }
 
 disconnect() {
@@ -34,6 +50,18 @@ disconnect() {
 	[ -z "${DISCONNECT_CONFIG_NAME}" ] && DISCONNECT_CONFIG_NAME="${SESSION_LIST[0]}" || { grep "\-\-\-$DISCONNECT_CONFIG_NAME---" <<< $(echo -n "---";printf "%s---" "${SESSION_LIST[@]}") > /dev/null || { echo "The connection [$DISCONNECT_CONFIG_NAME] doesn't have an active session"; exit 1; }; }
 
 	openvpn3 session-manage --disconnect --config "${DISCONNECT_CONFIG_NAME}"
+	local status=$?
+
+	if [ $status -eq 0 ]; then
+		if command -v yad > /dev/null 2>&1; then
+			if [ -f "$YAD_PID_FILE" ]; then
+				kill $(cat "$YAD_PID_FILE") 2>/dev/null
+				rm -f "$YAD_PID_FILE"
+			fi
+			notify-send -i "$VPN_ICON" -t 4000 "OpenVPN Disconnected" "Disconnected from ${DISCONNECT_CONFIG_NAME}" 2>/dev/null
+		fi
+	fi
+	return $status
 }
 
 stats() {
@@ -112,9 +140,23 @@ main() {
 			help
 			;;
 		*)
-			[ -n "$ACTION" ] && echo "Invalid action [$ACTION]"
-			help
-			[ -z "$ACTION" ] && exit 0 || exit 1
+			if [ -z "$ACTION" ]; then
+				if command -v yad > /dev/null 2>&1; then
+					SESSION_LIST=($(list s 2>/dev/null | grep "Config name:" | sed 's|Config name:||' | sed 's|^[[:space:]]*||'))
+					if [ ${#SESSION_LIST[@]} -gt 0 ]; then
+						disconnect "${SESSION_LIST[0]}"
+					else
+						connect
+					fi
+					exit 0
+				fi
+				help
+				exit 0
+			else
+				echo "Invalid action [$ACTION]"
+				help
+				exit 1
+			fi
 			;;
 	esac
 
