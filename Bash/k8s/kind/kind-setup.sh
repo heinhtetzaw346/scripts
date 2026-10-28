@@ -93,8 +93,8 @@ gather_options() {
 	SERVICE_SUBNET_CIDR="${SERVICE_SUBNET_CIDR:-10.96.0.0/12}"
 
 	#kube proxy mode
-	read -r -p "Enter the kube-proxy mode [iptables]: " KUBE_PROXY_MODE	
-	KUBE_PROXY_MODE="${KUBE_PROXY_MODE:-iptables}"
+	read -r -p "Enter the kube-proxy mode [nftables]: " KUBE_PROXY_MODE
+	KUBE_PROXY_MODE="${KUBE_PROXY_MODE:-nftables}"
 
 	#Disable default CNI?
 	read -r -p "Disable default CNI?[false]: " DISABLE_DEFAULT_CNI
