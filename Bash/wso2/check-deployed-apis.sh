@@ -1,38 +1,88 @@
 #!/usr/bin/env bash
 
 # --- Configuration ---
-# APIM Base URL
-APIM_BASE_URL="https://apim.yomabank.io"
-
 # You can modify the target environments to filter for in this array.
 # Endpoints / Environments to check:
 TARGET_ENVIRONMENTS=("apim-gw-v4-ext" "new-nga-apigwc")
 
-# Load environment variables
-if [ -f ".env.tokens" ]; then
+# Script directory so .env can be found regardless of the CWD
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load environment variables (username / password / base URL)
+if [ -f "${SCRIPT_DIR}/.env" ]; then
     # Load and export envs to make them available to subshells / commands
-    export $(grep -v '^#' .env.tokens | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/.env"
+    set +a
 else
-    echo "Error: .env.tokens file not found!" >&2
+    echo "Error: .env file not found at ${SCRIPT_DIR}/.env!" >&2
     exit 1
 fi
 
-# Ensure required tokens are present
-if [ -z "${AM_ACC_TOKEN_DEFAULT_P2}" ] || [ -z "${WSO2_AM_TOKEN_1_Default}" ]; then
-    echo "Error: Missing required tokens AM_ACC_TOKEN_DEFAULT_P2 or WSO2_AM_TOKEN_1_Default in .env.tokens" >&2
-    exit 1
+# APIM Base URL (from .env, overridable via environment)
+if [ -z "${APIM_BASE_URL}" ]; then
+    read -p "Enter APIM Base URL [https://nonprod-apim.yomabank.org]: " INPUT_URL
+    APIM_BASE_URL=${INPUT_URL:-https://nonprod-apim.yomabank.org}
 fi
+
+# Ensure required credentials are present
+check_and_ask_credentials() {
+    if [ -z "${APIM_USERNAME}" ]; then
+        read -p "Enter APIM username: " APIM_USERNAME
+    fi
+
+    if [ -z "${APIM_PASSWORD}" ]; then
+        read -s -p "Enter APIM password: " APIM_PASSWORD
+        echo
+    fi
+}
+
+check_and_ask_credentials
 
 # Output CSV Path
 OUTPUT_CSV="deployed_apis.csv"
 
+PUBLISHER_API="${APIM_BASE_URL}/api/am/publisher/v3"
+
+# Fetch a publisher REST API resource using username/password authentication.
+# Uses HTTP Basic auth, retrying once with a fresh login session on 401/403.
+publisher_api_get() {
+    local PATH_AND_QUERY="$1"
+    local RESPONSE HTTP_CODE BODY
+
+    RESPONSE=$(curl -s -w "\n%{http_code}" "${PUBLISHER_API}${PATH_AND_QUERY}" \
+        -u "${APIM_USERNAME}:${APIM_PASSWORD}" \
+        -H "accept: application/json")
+    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    BODY=$(echo "$RESPONSE" | sed '$ d')
+
+    if [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "403" ]; then
+        echo "Authorization failed (HTTP $HTTP_CODE). Re-checking credentials..." >&2
+        APIM_USERNAME=""
+        APIM_PASSWORD=""
+        check_and_ask_credentials
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" "${PUBLISHER_API}${PATH_AND_QUERY}" \
+            -u "${APIM_USERNAME}:${APIM_PASSWORD}" \
+            -H "accept: application/json")
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$ d')
+
+        if [ "$HTTP_CODE" == "401" ] || [ "$HTTP_CODE" == "403" ]; then
+            echo "Error: Authorization failed again (HTTP $HTTP_CODE)." >&2
+            echo "$BODY" >&2
+            return 1
+        fi
+    fi
+
+    echo "$BODY"
+}
+
 echo "Fetching all APIs from ${APIM_BASE_URL}..."
 # Fetch all APIs (handling default limit or retrieving all)
 # Since there are 85 APIs, limit=100 is safe to fetch all of them.
-APIS_JSON=$(curl -s "${APIM_BASE_URL}/api/am/publisher/v3/apis?limit=100" \
-    -b "AM_ACC_TOKEN_DEFAULT_P2=${AM_ACC_TOKEN_DEFAULT_P2}" \
-    -H "accept: application/json" \
-    -H "authorization: Bearer ${WSO2_AM_TOKEN_1_Default}")
+APIS_JSON=$(publisher_api_get "/apis?limit=100")
 
 # Check if we got valid JSON
 if ! echo "${APIS_JSON}" | jq -e '.list' >/dev/null 2>&1; then
@@ -73,10 +123,7 @@ while read -r api; do
     echo "[$CURRENT/$TOTAL_APIS] Checking: $API_NAME (v$API_VER)"
 
     # Get deployments for the API
-    DEPLOYMENTS_JSON=$(curl -s "${APIM_BASE_URL}/api/am/publisher/v3/apis/${API_ID}/deployments" \
-        -b "AM_ACC_TOKEN_DEFAULT_P2=${AM_ACC_TOKEN_DEFAULT_P2}" \
-        -H "accept: application/json" \
-        -H "authorization: Bearer ${WSO2_AM_TOKEN_1_Default}")
+    DEPLOYMENTS_JSON=$(publisher_api_get "/apis/${API_ID}/deployments")
 
     # Check for empty response or error
     if echo "$DEPLOYMENTS_JSON" | jq -e 'has("code")' >/dev/null 2>&1; then
